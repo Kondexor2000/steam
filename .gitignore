@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 reports/*.csv
+*.db
+*.db-shm
+*.db-wal
+.env*
+!.env.example
 bin/
 obj/
 node_modules/

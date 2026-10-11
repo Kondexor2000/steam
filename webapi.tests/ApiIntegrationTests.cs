@@ -12,13 +12,36 @@ using ServerActivity.Api.Authentication;
 
 namespace ServerActivity.Api.Tests;
 
-public sealed class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly HttpClient _client;
+    private readonly WebApplicationFactory<Program> _factory;
+    private readonly string _dataDirectory;
 
     public ApiIntegrationTests(WebApplicationFactory<Program> factory)
     {
-        _client = factory.WithWebHostBuilder(_ => { }).CreateClient();
+        _dataDirectory = Path.Combine(Path.GetTempPath(), $"server-activity-api-test-{Guid.NewGuid():N}");
+        var configuration = new Dictionary<string, string?>
+        {
+            ["Authentication:DatabasePath"] = Path.Combine(_dataDirectory, "users.db"),
+            ["LocalPlaytime:DatabasePath"] = Path.Combine(_dataDirectory, "playtime.db"),
+            ["Security:BackupDirectory"] = Path.Combine(_dataDirectory, "backups"),
+        };
+        _factory = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, config) =>
+                config.AddInMemoryCollection(configuration)));
+        _client = _factory.CreateClient();
+    }
+
+    public void Dispose()
+    {
+        _client.Dispose();
+        _factory.Dispose();
+        SqliteConnection.ClearAllPools();
+        if (Directory.Exists(_dataDirectory))
+        {
+            Directory.Delete(_dataDirectory, recursive: true);
+        }
     }
 
     [Fact]

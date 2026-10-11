@@ -1,13 +1,20 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ServerActivity.Api.TeamSpeak;
 
 namespace ServerActivity.Api.Analysis;
 
 [ApiController]
 [Authorize]
 [Route("api/analysis")]
-public sealed class AnalysisController(SessionAnalyzer analyzer) : ControllerBase
+public sealed class AnalysisController(
+    SessionAnalyzer analyzer,
+    TeamSpeakService teamSpeakService) : ControllerBase
 {
+    [HttpGet]
+    public ActionResult<AnalysisResult> GetAnalysis() =>
+        Ok(teamSpeakService.GetAnalysis(analyzer));
+
     [HttpPost("csv")]
     [RequestSizeLimit(5_000_000)]
     [Consumes("multipart/form-data")]
@@ -29,7 +36,9 @@ public sealed class AnalysisController(SessionAnalyzer analyzer) : ControllerBas
         var csv = await reader.ReadToEndAsync(cancellationToken);
         try
         {
-            return Ok(analyzer.AnalyzeCsv(csv));
+            var importedSessions = analyzer.ParseRecords(csv);
+            teamSpeakService.ImportCsvSessions(importedSessions, csv);
+            return Ok(teamSpeakService.GetAnalysis(analyzer));
         }
         catch (AnalysisValidationException exception)
         {

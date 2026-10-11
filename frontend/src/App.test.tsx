@@ -142,7 +142,7 @@ it("shows the backup download action only for an administrator", async () => {
   const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
     token: "admin-token",
     isAdministrator: true,
-  }), { status: 200 }));
+  }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
@@ -151,4 +151,50 @@ it("shows the backup download action only for an administrator", async () => {
   await user.click(screen.getByRole("button", { name: "Zaloguj się" }));
 
   expect(await screen.findByRole("button", { name: "Pobierz odszyfrowany backup" })).toBeInTheDocument();
+});
+
+it("loads TeamSpeak servers for administrators and synchronizes from the panel", async () => {
+  const user = userEvent.setup();
+  const server = {
+    id: 4,
+    name: "Główny serwer",
+    host: "ts.example.com",
+    queryPort: 10011,
+    virtualServerId: 1,
+    queryUsername: "query-user",
+    lastSyncAt: null,
+    lastError: null,
+    activeClients: 0,
+  };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      token: "admin-token",
+      isAdministrator: true,
+    }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify([server]), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      activeClients: 2,
+      startedSessions: 1,
+      endedSessions: 0,
+    }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify([{
+      ...server,
+      activeClients: 2,
+      lastSyncAt: "2026-10-11T12:00:00Z",
+    }]), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ servers: [], players: [] }), { status: 200 }));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  await user.type(screen.getByLabelText("Login"), "admin");
+  await user.type(screen.getByLabelText("Hasło"), "correct-horse");
+  await user.click(screen.getByRole("button", { name: "Zaloguj się" }));
+
+  expect(await screen.findByRole("heading", { name: "Główny serwer" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Synchronizuj teraz" }));
+
+  expect(await screen.findByText(/2 aktywnych użytkowników, 1 nowych sesji/)).toBeInTheDocument();
+  expect(fetchMock.mock.calls.map(([url]) => url)).toContain(
+    "/api/teamspeak/servers/4/sync",
+  );
 });
