@@ -1,6 +1,8 @@
 # TeamSpeak i serwery gier — analiza aktywności graczy
 
-MVP analizuje znormalizowane rekordy sesji zaimportowane z CSV: czas połączenia graczy z serwerem TeamSpeak oraz statystyki aktywności na wielu serwerach gier hostowanych przez gracza. Nie łączy się bezpośrednio z serwerami ani nie pobiera logów automatycznie; eksporty/logi należy przed importem przekształcić do opisanego niżej formatu.
+Aplikacja zapisuje sesje w lokalnej bazie SQLite i może cyklicznie pobierać listę aktywnych użytkowników z serwerów TeamSpeak przez ServerQuery. Administrator dodaje serwer i dane konta Query w panelu; od tej pory synchronizacja odbywa się automatycznie, a raport łączy zebrane sesje z zaimportowaną historią CSV. Import CSV pozostaje dodatkiem do przenoszenia starych danych.
+
+ServerQuery udostępnia bieżący stan serwera, a nie historyczną bazę sesji. Aplikacja rejestruje czas połączeń od rozpoczęcia synchronizacji; sprawdza stan co 30 sekund, więc czas rozłączenia jest przybliżony do interwału. Dane sprzed podłączenia serwera można uzupełnić importem CSV.
 
 ## Dane demonstracyjne
 
@@ -84,7 +86,7 @@ Pipeline `Jenkinsfile` weryfikuje analizator Python, uruchamia testy .NET i fron
 
 ## WebAPI C# i React
 
-`webapi/` udostępnia API do analizy tego samego formatu CSV co skrypt Python oraz pomiaru czasu działania wybranych gier na lokalnym komputerze. `frontend/` zawiera aplikację React do rejestracji, logowania, przesyłania CSV i zarządzania lokalnym pomiarem.
+`webapi/` udostępnia API do zarządzania serwerami TeamSpeak, zbierania sesji, importu CSV oraz pomiaru czasu działania wybranych gier na lokalnym komputerze. `frontend/` zawiera aplikację React z panelem administratora i raportem zapisanych sesji.
 
 Wymagane: .NET 8 SDK, Node.js 20+ i npm.
 
@@ -112,6 +114,17 @@ $env:Security__BackupKey = "<wygenerowany-klucz-base64>"
 $env:Security__AdminLogins = "admin1,admin2"
 ```
 
+Loginy administratorów z `Security__AdminLogins` mają dostęp do zarządzania serwerami TeamSpeak. Konto ServerQuery podaje się w panelu; jego hasło jest szyfrowane przez ASP.NET Data Protection i nie wraca w odpowiedziach API. Nie usuwaj katalogu `webapi/data/keys` (w Dockerze: wolumenu `api-data`), bo zawiera klucze potrzebne do odszyfrowania zapisanych haseł. Klucze Data Protection są dołączane do zaszyfrowanego backupu.
+
+### Podłączenie TeamSpeak
+
+1. Uruchom API i zaloguj się kontem wymienionym w `Security__AdminLogins`.
+2. W panelu „Serwery TeamSpeak” wpisz nazwę, host, port ServerQuery (domyślnie `10011`), ID serwera wirtualnego (domyślnie `1`) i dane konta ServerQuery.
+3. Otwórz port ServerQuery w zaporze serwera tak, aby był osiągalny z komputera lub kontenera uruchamiającego API. Nie wystawiaj go publicznie: surowe połączenie TCP nie szyfruje danych logowania. Użyj zaufanej sieci, VPN albo tunelu SSH i w panelu podaj adres/port dostępny po stronie API. Kliknij „Testuj połączenie”, a następnie „Synchronizuj teraz”; dalsze synchronizacje odbywają się automatycznie co 30 sekund.
+4. Raport aktywności prezentuje zarówno dane zebrane przez aplikację, jak i zaimportowane rekordy CSV.
+
+Serwer TeamSpeak nie musi udostępniać swojej wewnętrznej bazy danych aplikacji. Potrzebny jest włączony ServerQuery i konto z uprawnieniami do odczytu listy klientów na wybranym serwerze wirtualnym. Jeśli serwer nie jest już aktywny lub potrzebna jest historia sprzed podłączenia aplikacji, użyj importu CSV w panelu.
+
 Ustaw te zmienne ponownie przed każdym uruchomieniem API. Nie generuj nowego klucza przy każdym uruchomieniu — jego utrata uniemożliwia odszyfrowanie istniejących backupów. Po udanym logowaniu z nowego adresu IP API tworzy zaszyfrowany backup obu baz: kont (w tym hashy haseł i historii logowań) oraz czasu gry. Jeśli tworzenie kopii się nie powiedzie, frontend pokaże ostrzeżenie, a API ponowi próbę przy kolejnym logowaniu. Odszyfrowany plik ZIP mogą pobierać wyłącznie użytkownicy wymienieni w `Security__AdminLogins`.
 
 API:
@@ -121,6 +134,13 @@ API:
 - `GET /api/security/login-history` — wymaga tokenu Bearer; zwraca do 100 ostatnich wpisów historii logowań bieżącego konta;
 - `GET /api/security/backup` — wymaga tokenu Bearer konta wymienionego w `Security__AdminLogins`; pobiera odszyfrowany backup ZIP;
 - `POST /api/analysis/csv` — wymaga tokenu Bearer; przyjmuje plik CSV w polu formularza `file` (maksymalnie 5 MB);
+- `GET /api/analysis` — wymaga tokenu Bearer; zwraca raport ze wszystkich zapisanych sesji;
+- `GET /api/teamspeak/servers` — wymaga tokenu Bearer; zwraca skonfigurowane serwery bez haseł;
+- `POST /api/teamspeak/servers` — wymaga roli administratora; dodaje serwer i szyfruje dane dostępu;
+- `POST /api/teamspeak/servers/{id}/test` — wymaga administratora; testuje połączenie ServerQuery;
+- `POST /api/teamspeak/servers/{id}/sync` — wymaga administratora; pobiera bieżących użytkowników i aktualizuje zapis sesji;
+- `DELETE /api/teamspeak/servers/{id}` — wymaga administratora; usuwa serwer i przypisane do niego sesje;
+- `GET /api/teamspeak/analysis` — wymaga tokenu Bearer; zwraca raport zapisanych sesji;
 - `GET /api/local-playtime/processes` — wymaga tokenu Bearer; zwraca nazwy procesów widocznych w bieżącej sesji systemu;
 - `GET /api/local-playtime/tracked-games` — wymaga tokenu Bearer; zwraca monitorowane gry, zebrany czas oraz przypisanych użytkowników i ich czas;
 - `POST /api/local-playtime/tracked-games` — wymaga tokenu Bearer; JSON `{ "gameName": "Minecraft", "processName": "Minecraft.Windows" }` rozpoczyna lub wznawia monitoring procesu;
@@ -142,6 +162,5 @@ npm run build
 
 ## Dalsze kroki
 
-1. Dodać adaptery do konkretnych źródeł logów/API TeamSpeak i gier po ustaleniu ich formatów oraz uprawnień.
-2. Dodać deduplikację sesji i obsługę ponownych połączeń na podstawie identyfikatorów z oryginalnych logów.
-3. Rozszerzyć raporty o trendy dzienne, aktywność równoległą i wizualizacje.
+1. Dodać import innych formatów archiwalnych oraz źródeł logów po ustaleniu ich formatów i uprawnień.
+2. Rozszerzyć raporty o trendy dzienne, aktywność równoległą i wizualizacje.

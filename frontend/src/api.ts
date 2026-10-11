@@ -46,6 +46,24 @@ export interface TrackedGameUser {
   isActive: boolean;
 }
 
+export interface TeamSpeakServer {
+  id: number;
+  name: string;
+  host: string;
+  queryPort: number;
+  virtualServerId: number;
+  queryUsername: string;
+  lastSyncAt: string | null;
+  lastError: string | null;
+  activeClients: number;
+}
+
+export interface TeamSpeakSyncResult {
+  activeClients: number;
+  startedSessions: number;
+  endedSessions: number;
+}
+
 interface LoginResult {
   token: string;
   expiresInSeconds: number;
@@ -85,6 +103,69 @@ export async function analyzeCsv(token: string, file: File): Promise<AnalysisRes
     body: form,
   });
   return readResponse<AnalysisResult>(response);
+}
+
+export async function getAnalysis(token: string): Promise<AnalysisResult> {
+  const response = await fetch(`${apiBase}/api/analysis`, {
+    headers: { Authorization: "Bearer " + token },
+  });
+  return readResponse<AnalysisResult>(response);
+}
+
+export async function getTeamSpeakServers(token: string): Promise<TeamSpeakServer[]> {
+  const response = await fetch(`${apiBase}/api/teamspeak/servers`, {
+    headers: { Authorization: "Bearer " + token },
+  });
+  return readResponse<TeamSpeakServer[]>(response);
+}
+
+export async function addTeamSpeakServer(
+  token: string,
+  server: {
+    name: string;
+    host: string;
+    queryPort: number;
+    virtualServerId: number;
+    queryUsername: string;
+    queryPassword: string;
+  },
+): Promise<void> {
+  const response = await fetch(`${apiBase}/api/teamspeak/servers`, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify(server),
+  });
+  await readResponse<{ id: number }>(response);
+}
+
+export async function testTeamSpeakServer(token: string, id: number): Promise<number> {
+  const response = await fetch(`${apiBase}/api/teamspeak/servers/${id}/test`, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token },
+  });
+  const result = await readResponse<{ activeClients: number }>(response);
+  return result.activeClients;
+}
+
+export async function syncTeamSpeakServer(
+  token: string,
+  id: number,
+): Promise<TeamSpeakSyncResult> {
+  const response = await fetch(`${apiBase}/api/teamspeak/servers/${id}/sync`, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token },
+  });
+  return readResponse<TeamSpeakSyncResult>(response);
+}
+
+export async function removeTeamSpeakServer(token: string, id: number): Promise<void> {
+  const response = await fetch(`${apiBase}/api/teamspeak/servers/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: "Bearer " + token },
+  });
+  if (!response.ok) {
+    await readResponse(response);
+  }
 }
 
 export async function getRunningProcesses(token: string): Promise<RunningProcess[]> {

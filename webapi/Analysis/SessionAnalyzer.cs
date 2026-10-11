@@ -42,7 +42,9 @@ public sealed class SessionAnalyzer
     private static readonly string[] RequiredColumns =
         ["service", "server_name", "game", "player", "connected_at", "disconnected_at"];
 
-    public AnalysisResult AnalyzeCsv(string csv)
+    public AnalysisResult AnalyzeCsv(string csv) => AnalyzeRecords(ParseRecords(csv));
+
+    public IReadOnlyList<SessionRecord> ParseRecords(string csv)
     {
         var rows = ParseCsv(csv);
         if (rows.Count < 2)
@@ -68,7 +70,7 @@ public sealed class SessionAnalyzer
                 $"Brak wymaganych kolumn: {string.Join(", ", missing)}");
         }
 
-        var sessions = new List<ParsedSession>();
+        var sessions = new List<SessionRecord>();
         foreach (var row in rows.Skip(1))
         {
             if (row.Count != rows[0].Count)
@@ -116,21 +118,35 @@ public sealed class SessionAnalyzer
                 throw new AnalysisValidationException("Nie można odczytać znacznika czasu sesji.");
             }
 
-            var durationMinutes = (disconnectedAt - connectedAt).TotalMinutes;
-            if (durationMinutes <= 0)
+            if (disconnectedAt <= connectedAt)
             {
                 throw new AnalysisValidationException(
                     "Czas zakończenia sesji musi być późniejszy niż czas połączenia.");
             }
 
-            sessions.Add(new ParsedSession(
-                service, server, game, player, durationMinutes));
+            sessions.Add(new SessionRecord(
+                service, server, game, player, connectedAt, disconnectedAt));
         }
 
         if (sessions.Count == 0)
         {
             throw new AnalysisValidationException("Plik nie zawiera żadnych sesji.");
         }
+
+        return sessions;
+    }
+
+    public AnalysisResult AnalyzeRecords(IEnumerable<SessionRecord> records)
+    {
+        var sessions = records
+            .Where(session => session.DisconnectedAt > session.ConnectedAt)
+            .Select(session => new ParsedSession(
+                session.Service,
+                session.ServerName,
+                session.Game,
+                session.Player,
+                (session.DisconnectedAt - session.ConnectedAt).TotalMinutes))
+            .ToArray();
 
         return new AnalysisResult(
             sessions.GroupBy(session => (session.Service, session.ServerName, session.Game))

@@ -42,6 +42,12 @@ public sealed class SecurityBackupService(
                 environment.ContentRootPath,
                 "playtime.db")),
     ];
+    private readonly string _dataProtectionKeysPath = Path.Combine(
+        Path.GetDirectoryName(GetDatabasePath(
+            configuration["LocalPlaytime:DatabasePath"],
+            environment.ContentRootPath,
+            "playtime.db"))!,
+        "keys");
 
     public bool HasBackup => File.Exists(_backupPath);
 
@@ -138,6 +144,17 @@ public sealed class SecurityBackupService(
                 using var entryStream = entry.Open();
                 using var databaseStream = File.OpenRead(snapshotPath);
                 databaseStream.CopyTo(entryStream);
+            }
+
+            if (Directory.Exists(_dataProtectionKeysPath))
+            {
+                foreach (var keyPath in Directory.GetFiles(_dataProtectionKeysPath, "*", SearchOption.TopDirectoryOnly))
+                {
+                    var entry = archive.CreateEntry($"data-protection-keys/{Path.GetFileName(keyPath)}", CompressionLevel.Optimal);
+                    using var entryStream = entry.Open();
+                    using var keyStream = File.OpenRead(keyPath);
+                    keyStream.CopyTo(entryStream);
+                }
             }
         }
 
